@@ -1,5 +1,8 @@
-use std::{fs::File, io::{BufReader, Read}};
 use simple_logger::SimpleLogger;
+use std::{
+    fs::File,
+    io::{BufReader, Read},
+};
 use vm::VM;
 
 mod vm;
@@ -8,9 +11,7 @@ fn main() {
     SimpleLogger::from_env().init().unwrap();
     let file = File::open("challenge/challenge.bin").unwrap();
 
-    VM::boot()
-        .load_program(read_binary(file))
-        .run();
+    VM::boot().load_program(read_binary(file)).run();
 
     println!("Hello, world!");
 }
