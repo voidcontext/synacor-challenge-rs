@@ -33,7 +33,7 @@ impl VM {
                 // halt
                 0 => {
                     log::debug!("opcode 0 (halt) at {}", self.pointer);
-                    self.pointer = self.pointer + 1
+                    self.pointer += 1
                 }
                 //set
                 1 => {
@@ -45,7 +45,7 @@ impl VM {
                     log::debug!("\tsetting register {} to {}", reg, value);
                     log::debug!("\tregisters: {:?}", self.registers);
 
-                    self.pointer = self.pointer + 3
+                    self.pointer += 3
                 }
                 // jmp
                 6 => {
@@ -66,7 +66,7 @@ impl VM {
                         self.pointer = jump_to.into()
                     } else {
                         log::debug!("\tnot jumping, moving to next");
-                        self.pointer = self.pointer + 3;
+                        self.pointer += 3;
                     }
                 }
                 // jf (jump if zero)
@@ -82,7 +82,7 @@ impl VM {
                         self.pointer = jump_to;
                     } else {
                         log::debug!("\tnot jumping, moving to next");
-                        self.pointer = self.pointer + 3;
+                        self.pointer += 3;
                     }
                 }
                 // out
@@ -92,12 +92,12 @@ impl VM {
                     log::debug!("char {} at {}", char, self.pointer + 1);
                     print!("{}", char);
 
-                    self.pointer = self.pointer + 2
+                    self.pointer += 2
                 }
                 // noop
                 21 => {
                     log::debug!("opcode 21 (noop) at {}", self.pointer);
-                    self.pointer = self.pointer + 1
+                    self.pointer += 1
                 }
                 code => panic!("Unimplemented op code: {} at {}", code, self.pointer),
             }
@@ -108,7 +108,7 @@ impl VM {
     fn get_register(&self, pointer: usize) -> usize {
         let value = self.memory[pointer];
 
-        if 32768 <= value && value < 32776 {
+        if (32768..32776).contains(&value) {
             let index: usize = (value % 32768).into();
 
             log::debug!(
@@ -130,7 +130,7 @@ impl VM {
         if value < 32768 {
             log::debug!("value is number: {} at {}", value, pointer);
             value
-        } else if 32768 <= value && value < 32776 {
+        } else if (32768..32776).contains(&value) {
             let index: usize = (value % 32768).into();
 
             log::debug!(

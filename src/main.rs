@@ -20,7 +20,7 @@ fn read_binary(file: File) -> Vec<u16> {
     let buf = BufReader::new(file);
     let mut result = Vec::new();
 
-    let mut iter = buf.bytes().into_iter();
+    let mut iter = buf.bytes();
 
     while let Some(low_byte_r) = iter.next() {
         if let Some(high_byte_r) = iter.next() {
