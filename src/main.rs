@@ -12,8 +12,6 @@ fn main() {
     let file = File::open("challenge/challenge.bin").unwrap();
 
     VM::boot().load_program(read_binary(file)).run();
-
-    println!("Hello, world!");
 }
 
 fn read_binary(file: File) -> Vec<usize> {
