@@ -1,12 +1,14 @@
 use core::panic;
-use std::{char, convert::TryInto, usize};
+use std::{char, convert::TryInto, io, usize};
+use Value::{Number, Register};
 
 #[derive(Debug)]
 pub struct VM {
-    memory: Vec<u16>,
-    registers: [u16; 8],
-    stack: Vec<u16>,
+    memory: Vec<usize>,
+    registers: [usize; 8],
+    stack: Vec<usize>,
     pointer: usize,
+    input_buffer: Vec<usize>,
 }
 
 impl VM {
@@ -16,10 +18,11 @@ impl VM {
             registers: [0, 0, 0, 0, 0, 0, 0, 0],
             stack: vec![],
             pointer: 0,
+            input_buffer: vec![],
         }
     }
 
-    pub fn load_program(mut self, program: Vec<u16>) -> Self {
+    pub fn load_program(mut self, program: Vec<usize>) -> Self {
         self.memory = program;
         self
     }
@@ -29,8 +32,9 @@ impl VM {
             "running the program loaded into the memory from {}",
             self.pointer
         );
-        while self.get_value_at_pointer() != 0 {
-            match self.get_value_at_pointer() {
+        while self.read_value_at_pointer() != 0 {
+            let op_code = self.read_value_at_pointer();
+            match op_code {
                 0 => self.halt(),
                 1 => self.set(),
                 2 => self.push(),
@@ -41,11 +45,17 @@ impl VM {
                 7 => self.jt(),
                 8 => self.jf(),
                 9 => self.add(),
+                10 => self.mult(),
+                11 => self.r#mod(),
                 12 => self.and(),
                 13 => self.or(),
                 14 => self.not(),
+                15 => self.rmem(),
+                16 => self.wmem(),
                 17 => self.call(),
+                18 => self.ret(),
                 19 => self.out(),
+                20 => self.r#in(),
                 21 => self.noop(),
                 _ => self.unimplemented(),
             }
@@ -57,7 +67,7 @@ impl VM {
         log::debug!(
             "found instruction {} (opcode {}) at {}",
             name,
-            self.get_value_at_pointer(),
+            self.read_value_at_pointer(),
             self.pointer
         )
     }
@@ -69,8 +79,9 @@ impl VM {
     fn set(&mut self) {
         self.log_opcode("set");
 
-        let reg: usize = self.get_register(self.pointer + 1);
-        let value = self.get_value(self.pointer + 2);
+        let reg = self.get_register(self.pointer + 1);
+
+        let value = self.read_value(self.pointer + 2);
 
         log::debug!("\tregisters before: {:?}", self.registers);
         log::debug!("\tsetting register {} to {}", reg, value);
@@ -84,7 +95,7 @@ impl VM {
     fn push(&mut self) {
         self.log_opcode("push");
 
-        let value = self.get_value(self.pointer + 1);
+        let value = self.read_value(self.pointer + 1);
         self.stack.push(value);
 
         self.pointer += 2;
@@ -105,8 +116,8 @@ impl VM {
         self.log_opcode("eq");
 
         let register = self.get_register(self.pointer + 1);
-        let a = self.get_value(self.pointer + 2);
-        let b = self.get_value(self.pointer + 3);
+        let a = self.read_value(self.pointer + 2);
+        let b = self.read_value(self.pointer + 3);
         let value = if a == b { 1 } else { 0 };
 
         log::debug!(
@@ -125,8 +136,8 @@ impl VM {
         self.log_opcode("gt");
 
         let register = self.get_register(self.pointer + 1);
-        let a = self.get_value(self.pointer + 2);
-        let b = self.get_value(self.pointer + 3);
+        let a = self.read_value(self.pointer + 2);
+        let b = self.read_value(self.pointer + 3);
         let value = if a > b { 1 } else { 0 };
 
         log::debug!(
@@ -144,18 +155,18 @@ impl VM {
     fn jmp(&mut self) {
         self.log_opcode("jmp");
 
-        let jump_to = self.get_value(self.pointer + 1);
+        let jump_to = self.read_value(self.pointer + 1);
         log::debug!("\tjumping to {}", jump_to);
-        self.pointer = jump_to.into();
+        self.pointer = jump_to;
     }
 
     fn jt(&mut self) {
         self.log_opcode("jt");
 
-        if self.get_value(self.pointer + 1) != 0 {
-            let jump_to = self.get_value(self.pointer + 2);
+        if self.read_value(self.pointer + 1) != 0 {
+            let jump_to = self.read_value(self.pointer + 2);
             log::debug!("\tjumping to {}", jump_to);
-            self.pointer = jump_to.into()
+            self.pointer = jump_to
         } else {
             log::debug!("\tnot jumping, moving to next");
             self.pointer += 3;
@@ -165,8 +176,8 @@ impl VM {
     fn jf(&mut self) {
         self.log_opcode("jf");
 
-        if self.get_value(self.pointer + 1) == 0 {
-            let jump_to = self.get_value(self.pointer + 2).into();
+        if self.read_value(self.pointer + 1) == 0 {
+            let jump_to = self.read_value(self.pointer + 2);
             log::debug!("\tjumping to {}", jump_to);
             self.pointer = jump_to;
         } else {
@@ -179,8 +190,8 @@ impl VM {
         self.log_opcode("add");
 
         let register = self.get_register(self.pointer + 1);
-        let a = self.get_value(self.pointer + 2);
-        let b = self.get_value(self.pointer + 3);
+        let a = self.read_value(self.pointer + 2);
+        let b = self.read_value(self.pointer + 3);
         let value = modulo(a + b);
 
         log::debug!(
@@ -195,12 +206,52 @@ impl VM {
         self.pointer += 4;
     }
 
+    fn mult(&mut self) {
+        self.log_opcode("mult");
+
+        let register = self.get_register(self.pointer + 1);
+        let a = self.read_value(self.pointer + 2);
+        let b = self.read_value(self.pointer + 3);
+        let value = modulo(a * b);
+
+        log::debug!(
+            "\tsetting register {} to {} * {} = {}",
+            register,
+            a,
+            b,
+            value
+        );
+
+        self.registers[register] = value;
+        self.pointer += 4;
+    }
+
+    fn r#mod(&mut self) {
+        self.log_opcode("mod");
+
+        let register = self.get_register(self.pointer + 1);
+        let a = self.read_value(self.pointer + 2);
+        let b = self.read_value(self.pointer + 3);
+        let value = a % b;
+
+        log::debug!(
+            "\tsetting register {} to {} % {} = {}",
+            register,
+            a,
+            b,
+            value
+        );
+
+        self.registers[register] = value;
+        self.pointer += 4;
+    }
+
     fn and(&mut self) {
         self.log_opcode("and");
 
         let register = self.get_register(self.pointer + 1);
-        let a = self.get_value(self.pointer + 2);
-        let b = self.get_value(self.pointer + 3);
+        let a = self.read_value(self.pointer + 2);
+        let b = self.read_value(self.pointer + 3);
         let value = modulo(a & b);
 
         log::debug!(
@@ -219,8 +270,8 @@ impl VM {
         self.log_opcode("or");
 
         let register = self.get_register(self.pointer + 1);
-        let a = self.get_value(self.pointer + 2);
-        let b = self.get_value(self.pointer + 3);
+        let a = self.read_value(self.pointer + 2);
+        let b = self.read_value(self.pointer + 3);
         let value = modulo(a | b);
 
         log::debug!(
@@ -239,7 +290,7 @@ impl VM {
         self.log_opcode("not");
 
         let register = self.get_register(self.pointer + 1);
-        let a = self.get_value(self.pointer + 2);
+        let a = self.read_value(self.pointer + 2);
         let value = modulo(!a);
 
         log::debug!("\tsetting register {} to !{} = {}", register, a, value);
@@ -248,24 +299,98 @@ impl VM {
         self.pointer += 3;
     }
 
+    fn rmem(&mut self) {
+        self.log_opcode("rmem");
+
+        let register = self.get_register(self.pointer + 1);
+        let address = self.read_value(self.pointer + 2);
+        let value = self.read_value(address);
+
+        log::debug!(
+            "\treading memory from address {} and storing in register {}, value is {}",
+            address,
+            register,
+            value
+        );
+
+        self.registers[register] = value;
+        self.pointer += 3;
+    }
+
+    fn wmem(&mut self) {
+        self.log_opcode("wmem");
+
+        let address = self.read_value(self.pointer + 1);
+        let value = self.read_value(self.pointer + 2);
+
+        log::debug!(
+            "\twriting memory address {} and storing value {}",
+            address,
+            value
+        );
+
+        self.memory[address] = value;
+        self.pointer += 3;
+    }
+
     fn call(&mut self) {
         self.log_opcode("call");
 
-        let jump_to = self.get_value(self.pointer + 1);
-        let original_next: u16 = (self.pointer + 2).try_into().unwrap();
+        let jump_to = self.read_value(self.pointer + 1);
+        let original_next = self.pointer + 2;
         self.stack.push(original_next);
 
-        self.pointer = jump_to.into();
+        self.pointer = jump_to;
+    }
+
+    fn ret(&mut self) {
+        self.log_opcode("ret");
+        let jumpt_to = self.stack.pop().unwrap();
+
+        log::debug!("\tjumping to {}", jumpt_to);
+        self.pointer = jumpt_to;
     }
 
     fn out(&mut self) {
         self.log_opcode("out");
 
-        let char = char::from_u32(self.get_value(self.pointer + 1).into()).unwrap();
-        log::debug!("\tchar {} at {}", char, self.pointer + 1);
+        let char_code = self.read_value(self.pointer + 1).try_into().unwrap();
+        let char = char::from_u32(char_code).unwrap();
+        log::debug!(
+            "\tchar {} (code {}) at {}",
+            char,
+            char_code,
+            self.pointer + 1
+        );
+        //        log::info!("char {} (code {}) at {}:", char, char_code, self.pointer + 1);
+
         print!("{}", char);
 
         self.pointer += 2
+    }
+
+    fn r#in(&mut self) {
+        self.log_opcode("in");
+
+        if self.input_buffer.is_empty() {
+            let mut buffer = String::new();
+            let stdin = io::stdin(); // We get `Stdin` here.
+            stdin.read_line(&mut buffer).unwrap();
+
+            //            println!("read: {}", buffer);
+
+            self.input_buffer = buffer.chars().map(|c| (c as usize)).collect();
+            self.input_buffer.reverse();
+        }
+
+        //      println!("input buffer: {:?}, pop() into {:?}", self.input_buffer, self.get_value(self.pointer + 1));
+
+        match self.get_value(self.pointer + 1) {
+            Number(addr) => self.memory[addr] = self.input_buffer.pop().unwrap(),
+            Register(r) => self.registers[r] = self.input_buffer.pop().unwrap(),
+        }
+
+        self.pointer += 2;
     }
 
     fn noop(&mut self) {
@@ -274,55 +399,47 @@ impl VM {
     }
 
     fn unimplemented(&mut self) {
-        panic!("umimplemented: {}", self.get_value_at_pointer())
+        panic!("umimplemented: {}", self.read_value_at_pointer())
     }
 
-    fn get_register(&self, pointer: usize) -> usize {
-        let value = self.memory[pointer];
+    fn read_value_at_pointer(&self) -> usize {
+        self.read_value(self.pointer)
+    }
 
-        if (32768..32776).contains(&value) {
-            let index: usize = (value % 32768).into();
-
-            log::debug!(
-                "value -> registers[{} mod 32768 = {}] = {} at {}",
-                value,
-                index,
-                self.registers[index],
-                pointer
-            );
-
-            index
-        } else {
-            panic!("illegal register: {} at {}", value, pointer);
+    fn read_value(&self, pointer: usize) -> usize {
+        match self.get_value(pointer) {
+            Number(n) => n,
+            Register(r) => self.registers[r],
         }
     }
 
-    fn get_value_at_pointer(&self) -> u16 {
-        self.get_value(self.pointer)
+    fn get_register(&self, pointer: usize) -> usize {
+        match self.get_value(pointer) {
+            Number(_) => panic!("Expected a register but got number"),
+            Register(r) => r,
+        }
     }
 
-    fn get_value(&self, pointer: usize) -> u16 {
+    fn get_value(&self, pointer: usize) -> Value {
         let value = self.memory[pointer];
         if value < 32768 {
             log::debug!("value is number: {} at {}", value, pointer);
-            value
+            Number(value)
         } else if (32768..32776).contains(&value) {
-            let index: usize = modulo(value).into();
-
-            log::debug!(
-                "value from register: registers[{} mod 32768 = {}] = {} at {}",
-                value,
-                index,
-                self.registers[index],
-                pointer
-            );
-            self.registers[index]
+            let index: usize = modulo(value);
+            Register(index)
         } else {
             panic!("illegal value: {} at {}", value, pointer)
         }
     }
 }
 
-fn modulo(number: u16) -> u16 {
+#[derive(Debug)]
+enum Value {
+    Number(usize),
+    Register(usize),
+}
+
+fn modulo(number: usize) -> usize {
     number % 32768
 }

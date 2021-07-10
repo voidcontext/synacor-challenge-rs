@@ -1,4 +1,3 @@
-use simple_logger::SimpleLogger;
 use std::{
     fs::File,
     io::{BufReader, Read},
@@ -8,7 +7,8 @@ use vm::VM;
 mod vm;
 
 fn main() {
-    SimpleLogger::from_env().init().unwrap();
+    simple_logging::log_to_file("vm.log", log::LevelFilter::Warn).unwrap();
+
     let file = File::open("challenge/challenge.bin").unwrap();
 
     VM::boot().load_program(read_binary(file)).run();
@@ -16,9 +16,9 @@ fn main() {
     println!("Hello, world!");
 }
 
-fn read_binary(file: File) -> Vec<u16> {
+fn read_binary(file: File) -> Vec<usize> {
     let buf = BufReader::new(file);
-    let mut result = Vec::new();
+    let mut result: Vec<usize> = Vec::new();
 
     let mut iter = buf.bytes();
 
@@ -27,7 +27,7 @@ fn read_binary(file: File) -> Vec<u16> {
             let low_byte = low_byte_r.unwrap();
             let high_byte = high_byte_r.unwrap();
 
-            result.push(((high_byte as u16) << 8) | low_byte as u16)
+            result.push((((high_byte as u16) << 8) | low_byte as u16).into())
         }
     }
     result
